@@ -231,8 +231,8 @@ class BitArray(ShapedMixin):
             counts: One or more counts-like mappings with the same number of shots.
             num_bits: The desired number of bits per shot. 
                 If unset, will be inferred from keys:
-                 - if bitstring keys, will be number of bits in string
-                 - if int or hexstring keys, the biggest value found sets this value
+                 - If bitstring keys, will be number of bits in string
+                 - If int or hexstring keys, will be inferred from the largest value found,
 
         Returns:
             A new bit array with shape ``()`` for single input counts, or ``(N,)`` for an iterable
@@ -250,7 +250,7 @@ class BitArray(ShapedMixin):
                 raise ValueError("At least one counts mapping expected.")
         
         if num_bits is None:
-            # If available, infer num_bits from string lengths before
+            # If bitstrings, infer num_bits from lengths before
             # converting to int keys:
             first_key = next(counts[0].keys(), None)
             if isinstance(first_key, str) and not first_key.startswith("0x"):
@@ -285,8 +285,10 @@ class BitArray(ShapedMixin):
 
         Args:
             samples: A list of bitstrings, a list of integers, or a list of hexstrings.
-            num_bits: The desired number of bits per sample. If unset, the biggest sample provided
-                is used to determine this value.
+            num_bits: The desired number of bits per shot. 
+                If unset, will be inferred from keys:
+                 - If bitstring keys, will be number of bits in string
+                 - If int or hexstring keys, will be inferred from the largest value found,
 
         Returns:
             A new bit array.
@@ -302,7 +304,16 @@ class BitArray(ShapedMixin):
 
         ints = chain([first_sample], samples)
         if isinstance(first_sample, str):
-            base = 16 if first_sample.startswith("0x") else 2
+            # If bitstrings, infer num_bits from lengths before
+            # converting to int keys:
+            if first_key.startswith("0x"):
+                base = 16
+            else:
+                base = 2
+                if first_key.startswith("0b"):
+                    num_bits = len(first_key)-2
+                else:
+                    num_bits = len(first_key)
             ints = (int(val, base=base) for val in ints)
 
         if num_bits is None:
