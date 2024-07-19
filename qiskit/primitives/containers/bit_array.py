@@ -233,6 +233,7 @@ class BitArray(ShapedMixin):
                 If unset, will be inferred from keys:
                  - If bitstring keys, will be number of bits in string
                  - If int or hexstring keys, will be inferred from the largest value found,
+                   with a minimum of num_bits = 1.
 
         Returns:
             A new bit array with shape ``()`` for single input counts, or ``(N,)`` for an iterable
@@ -289,6 +290,7 @@ class BitArray(ShapedMixin):
                 If unset, will be inferred from keys:
                  - If bitstring keys, will be number of bits in string
                  - If int or hexstring keys, will be inferred from the largest value found,
+                   with a minimum of num_bits = 1.
 
         Returns:
             A new bit array.
@@ -320,6 +322,9 @@ class BitArray(ShapedMixin):
             # we are forced to prematurely look at every iterand in this case
             ints = list(ints)
             num_bits = max(map(int.bit_length, ints))
+            # convention: if the only value is 0, represent with one bit:
+            if num_bits == 0:
+                num_bits = 1
 
         num_bytes = _min_num_bytes(num_bits)
         data = b"".join(val.to_bytes(num_bytes, "big") for val in ints)
