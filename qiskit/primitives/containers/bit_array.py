@@ -229,8 +229,10 @@ class BitArray(ShapedMixin):
 
         Args:
             counts: One or more counts-like mappings with the same number of shots.
-            num_bits: The desired number of bits per shot. If unset, the biggest value found sets
-                this value.
+            num_bits: The desired number of bits per shot. 
+                If unset, will be inferred from keys:
+                 - if bitstring keys, will be number of bits in string
+                 - if int or hexstring keys, the biggest value found sets this value
 
         Returns:
             A new bit array with shape ``()`` for single input counts, or ``(N,)`` for an iterable
@@ -246,6 +248,16 @@ class BitArray(ShapedMixin):
             counts = list(counts)
             if not counts:
                 raise ValueError("At least one counts mapping expected.")
+        
+        if num_bits is None:
+            # If available, infer num_bits from string lengths before
+            # converting to int keys:
+            first_key = next(counts[0].keys(), None)
+            if isinstance(first_key, str) and not first_key.startswith("0x"):
+                if first_key.startswith("0b"):
+                    num_bits = len(first_key)-2
+                else:
+                    num_bits = len(first_key)
 
         counts = [
             mapping.int_outcomes() if isinstance(mapping, Counts) else mapping for mapping in counts
