@@ -12,8 +12,8 @@
 
 **Qiskit**  is an open-source SDK for working with quantum computers at the level of extended quantum circuits, operators, and primitives.
 
-This library is the core component of Qiskit, which contains the building blocks for creating and working with quantum circuits, quantum operators, and primitive functions (sampler and estimator).
-It also contains a transpiler that supports optimizing quantum circuits and a quantum information toolbox for creating advanced quantum operators. 
+This library is the core component of Qiskit, which contains the building blocks for creating and working with quantum circuits, quantum operators, and primitive functions (Sampler and Estimator).
+It also contains a transpiler that supports optimizing quantum circuits, and a quantum information toolbox for creating advanced operators.
 
 For more details on how to use Qiskit, refer to the documentation located here:
 
@@ -76,7 +76,7 @@ Running this will give an outcome similar to `{0: 0.497, 7: 0.503}` which is `00
 To illustrate the power of Estimator, we now use the quantum information toolbox to create the operator $XXY+XYX+YXX-YYY$ and pass it to the `run()` function, along with our quantum circuit. Note the Estimator requires a circuit _**without**_ measurement, so we use the `qc_example` circuit we created earlier.
 
 ```python
-# 2. define the observable to be measured 
+# 2. Define the observable to be measured 
 from qiskit.quantum_info import SparsePauliOp
 operator = SparsePauliOp.from_list([("XXY", 1), ("XYX", 1), ("YXX", 1), ("YYY", -1)])
 
@@ -91,12 +91,12 @@ print(f" > Expectation values: {result.values}")
 Running this will give the outcome `4`. For fun, try to assign a value of +/- 1 to each single-qubit operator X and Y 
 and see if you can achieve this outcome. (Spoiler alert: this is not possible!)
 
-Using the Qiskit-provided `qiskit.primitives.Sampler` and `qiskit.primitives.Estimator` will not take you very far. The power of quantum computing cannot be simulated 
-on classical computers and you need to use real quantum hardware to scale to larger quantum circuits. However, running a quantum 
-circuit on hardware requires rewriting them to the basis gates and connectivity of the quantum hardware.
-The tool that does this is the [transpiler](https://docs.quantum.ibm.com/api/qiskit/transpiler) 
-and Qiskit includes transpiler passes for synthesis, optimization, mapping, and scheduling. However, it also includes a
-default compiler which works very well in most examples. The following code will map the example circuit to the `basis_gates = ['cz', 'sx', 'rz']` and a linear chain of qubits $0 \rightarrow 1 \rightarrow 2$ with the `coupling_map =[[0, 1], [1, 2]]`.
+Using the Qiskit-provided `qiskit.primitives.Sampler` and `qiskit.primitives.Estimator` will not take you very far.
+The power of quantum computing cannot be simulated on classical computers and you need to use real quantum hardware to scale to larger quantum circuits.
+However, running a quantum circuit on hardware requires rewriting to the basis gates and connectivity of the quantum hardware.
+The tool that does this is the [transpiler](https://docs.quantum.ibm.com/api/qiskit/transpiler), and Qiskit includes transpiler passes for synthesis, optimization, mapping, and scheduling.
+However, it also includes a default compiler, which works very well in most examples.
+The following code will map the example circuit to the `basis_gates = ['cz', 'sx', 'rz']` and a linear chain of qubits $0 \rightarrow 1 \rightarrow 2$ with the `coupling_map =[[0, 1], [1, 2]]`.
 
 ```python
 from qiskit import transpile

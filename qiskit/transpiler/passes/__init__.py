@@ -46,6 +46,7 @@ Routing
    StochasticSwap
    SabreSwap
    Commuting2qGateRouter
+   StarPreRouting
 
 Basis Change
 ============
@@ -87,8 +88,10 @@ Optimizations
    EchoRZXWeylDecomposition
    ResetAfterMeasureSimplification
    OptimizeCliffords
+   ElidePermutations
    NormalizeRXAngle
    OptimizeAnnotated
+   Split2QUnitaries
 
 Calibration
 =============
@@ -152,8 +155,10 @@ The synthesis transpiler plugin documentation can be found in the
    HLSConfig
    SolovayKitaev
 
-Post Layout (Post transpile qubit selection)
-============================================
+Post Layout
+===========
+
+These are post qubit selection.
 
 .. autosummary::
    :toctree: ../stubs/
@@ -204,6 +209,7 @@ from .routing import LookaheadSwap
 from .routing import StochasticSwap
 from .routing import SabreSwap
 from .routing import Commuting2qGateRouter
+from .routing import StarPreRouting
 
 # basis change
 from .basis import Decompose
@@ -236,8 +242,10 @@ from .optimization import CollectLinearFunctions
 from .optimization import CollectCliffords
 from .optimization import ResetAfterMeasureSimplification
 from .optimization import OptimizeCliffords
+from .optimization import ElidePermutations
 from .optimization import NormalizeRXAngle
 from .optimization import OptimizeAnnotated
+from .optimization import Split2QUnitaries
 
 # circuit analysis
 from .analysis import ResourceEstimation

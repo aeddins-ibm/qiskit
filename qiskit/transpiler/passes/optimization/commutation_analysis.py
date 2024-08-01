@@ -27,9 +27,13 @@ class CommutationAnalysis(AnalysisPass):
     are grouped into a set of gates that commute.
     """
 
-    def __init__(self):
+    def __init__(self, *, _commutation_checker=None):
         super().__init__()
-        self.comm_checker = scc
+        # allow setting a private commutation checker, this allows better performance if we
+        # do not care about commutations of all gates, but just a subset
+        if _commutation_checker is None:
+            _commutation_checker = scc
+        self.comm_checker = _commutation_checker
 
     def run(self, dag):
         """Run the CommutationAnalysis pass on `dag`.
@@ -47,7 +51,7 @@ class CommutationAnalysis(AnalysisPass):
         # self.property_set['commutation_set'][wire][(node, wire)] will give the
         # commutation set that contains node.
 
-        for wire in dag.wires:
+        for wire in dag.qubits:
             self.property_set["commutation_set"][wire] = []
 
         # Add edges to the dictionary for each qubit
@@ -56,7 +60,7 @@ class CommutationAnalysis(AnalysisPass):
                 self.property_set["commutation_set"][(node, edge_wire)] = -1
 
         # Construct the commutation set
-        for wire in dag.wires:
+        for wire in dag.qubits:
 
             for current_gate in dag.nodes_on_wire(wire):
 
@@ -72,14 +76,7 @@ class CommutationAnalysis(AnalysisPass):
                         does_commute = (
                             isinstance(current_gate, DAGOpNode)
                             and isinstance(prev_gate, DAGOpNode)
-                            and self.comm_checker.commute(
-                                current_gate.op,
-                                current_gate.qargs,
-                                current_gate.cargs,
-                                prev_gate.op,
-                                prev_gate.qargs,
-                                prev_gate.cargs,
-                            )
+                            and self.comm_checker.commute_nodes(current_gate, prev_gate)
                         )
                         if not does_commute:
                             break

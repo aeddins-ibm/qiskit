@@ -14,7 +14,6 @@
 
 from qiskit.transpiler.basepasses import AnalysisPass
 from qiskit.transpiler.target import Target
-from qiskit.circuit.controlflow import ControlFlowOp
 from qiskit.converters import circuit_to_dag
 
 
@@ -73,7 +72,7 @@ class CheckMap(AnalysisPass):
 
     def _recurse(self, dag, wire_map) -> bool:
         for node in dag.op_nodes(include_directives=False):
-            if isinstance(node.op, ControlFlowOp):
+            if node.is_control_flow():
                 for block in node.op.blocks:
                     inner_wire_map = {
                         inner: wire_map[outer] for inner, outer in zip(block.qubits, node.qargs)
@@ -85,10 +84,8 @@ class CheckMap(AnalysisPass):
                 and not dag.has_calibration_for(node)
                 and (wire_map[node.qargs[0]], wire_map[node.qargs[1]]) not in self.qargs
             ):
-                self.property_set["check_map_msg"] = "{}({}, {}) failed".format(
-                    node.name,
-                    wire_map[node.qargs[0]],
-                    wire_map[node.qargs[1]],
+                self.property_set["check_map_msg"] = (
+                    f"{node.name}({wire_map[node.qargs[0]]}, {wire_map[node.qargs[1]]}) failed"
                 )
                 return False
         return True

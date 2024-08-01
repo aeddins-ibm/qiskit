@@ -12,6 +12,10 @@
 
 """Built-in transpiler stage plugins for preset pass managers."""
 
+import os
+
+from qiskit.circuit import Instruction
+from qiskit.transpiler.passes.optimization.split_2q_unitaries import Split2QUnitaries
 from qiskit.transpiler.passmanager import PassManager
 from qiskit.transpiler.exceptions import TranspilerError
 from qiskit.transpiler.passes import BasicSwap
@@ -26,7 +30,7 @@ from qiskit.transpiler.passes import DenseLayout
 from qiskit.transpiler.passes import TrivialLayout
 from qiskit.transpiler.passes import CheckMap
 from qiskit.transpiler.passes import BarrierBeforeFinalMeasurements
-from qiskit.transpiler.passes import OptimizeSwapBeforeMeasure
+from qiskit.transpiler.passes import ElidePermutations
 from qiskit.transpiler.passes import RemoveDiagonalGatesBeforeMeasure
 from qiskit.transpiler.preset_passmanagers import common
 from qiskit.transpiler.preset_passmanagers.plugin import (
@@ -62,7 +66,22 @@ from qiskit.circuit.library.standard_gates import (
     CYGate,
     SXGate,
     SXdgGate,
+    get_standard_gate_name_mapping,
 )
+from qiskit.utils.parallel import CPU_COUNT
+from qiskit import user_config
+
+CONFIG = user_config.get_config()
+
+_discrete_skipped_ops = {
+    "delay",
+    "reset",
+    "measure",
+    "switch_case",
+    "if_else",
+    "for_loop",
+    "while_loop",
+}
 
 
 class DefaultInitPassManager(PassManagerStagePlugin):
@@ -87,7 +106,7 @@ class DefaultInitPassManager(PassManagerStagePlugin):
                     pass_manager_config.unitary_synthesis_plugin_config,
                     pass_manager_config.hls_config,
                 )
-        elif optimization_level in {1, 2}:
+        elif optimization_level == 1:
             init = PassManager()
             if (
                 pass_manager_config.initial_layout
@@ -123,10 +142,8 @@ class DefaultInitPassManager(PassManagerStagePlugin):
                     ]
                 )
             )
-            if optimization_level == 2:
-                init.append(CommutativeCancellation())
 
-        elif optimization_level == 3:
+        elif optimization_level in {2, 3}:
             init = common.generate_unroll_3q(
                 pass_manager_config.target,
                 pass_manager_config.basis_gates,
@@ -135,7 +152,7 @@ class DefaultInitPassManager(PassManagerStagePlugin):
                 pass_manager_config.unitary_synthesis_plugin_config,
                 pass_manager_config.hls_config,
             )
-            init.append(OptimizeSwapBeforeMeasure())
+            init.append(ElidePermutations())
             init.append(RemoveDiagonalGatesBeforeMeasure())
             init.append(
                 InverseCancellation(
@@ -156,9 +173,60 @@ class DefaultInitPassManager(PassManagerStagePlugin):
                 )
             )
             init.append(CommutativeCancellation())
+            # skip peephole optimization before routing if target basis gate set is discrete,
+            # i.e. only consists of Cliffords that an user might want to keep
+            # use rz, sx, x, cx as basis, rely on physical optimziation to fix everything later one
+            stdgates = get_standard_gate_name_mapping()
 
+            def _is_one_op_non_discrete(ops):
+                """Checks if one operation in `ops` is not discrete, i.e. is parameterizable
+                Args:
+                    ops (List(Operation)): list of operations to check
+                Returns
+                    True if at least one operation in `ops` is not discrete, False otherwise
+                """
+                found_one_continuous_gate = False
+                for op in ops:
+                    if isinstance(op, str):
+                        if op in _discrete_skipped_ops:
+                            continue
+                        op = stdgates.get(op, None)
+
+                    if op is not None and op.name in _discrete_skipped_ops:
+                        continue
+
+                    if op is None or not isinstance(op, Instruction):
+                        return False
+
+                    if len(op.params) > 0:
+                        found_one_continuous_gate = True
+                return found_one_continuous_gate
+
+            target = pass_manager_config.target
+            basis = pass_manager_config.basis_gates
+            # consolidate gates before routing if the user did not specify a discrete basis gate, i.e.
+            # * no target or basis gate set has been specified
+            # * target has been specified, and we have one non-discrete gate in the target's spec
+            # * basis gates have been specified, and we have one non-discrete gate in that set
+            do_consolidate_blocks_init = target is None and basis is None
+            do_consolidate_blocks_init |= target is not None and _is_one_op_non_discrete(
+                target.operations
+            )
+            do_consolidate_blocks_init |= basis is not None and _is_one_op_non_discrete(basis)
+
+            if do_consolidate_blocks_init:
+                init.append(Collect2qBlocks())
+                init.append(ConsolidateBlocks())
+                # If approximation degree is None that indicates a request to approximate up to the
+                # error rates in the target. However, in the init stage we don't yet know the target
+                # qubits being used to figure out the fidelity so just use the default fidelity parameter
+                # in this case.
+                if pass_manager_config.approximation_degree is not None:
+                    init.append(Split2QUnitaries(pass_manager_config.approximation_degree))
+                else:
+                    init.append(Split2QUnitaries())
         else:
-            return TranspilerError(f"Invalid optimization level {optimization_level}")
+            raise TranspilerError(f"Invalid optimization level {optimization_level}")
         return init
 
 
@@ -400,11 +468,12 @@ class SabreSwapPassManager(PassManagerStagePlugin):
             pass_manager_config.initial_layout,
         )
         if optimization_level == 0:
+            trial_count = _get_trial_count(5)
             routing_pass = SabreSwap(
                 coupling_map_routing,
                 heuristic="basic",
                 seed=seed_transpiler,
-                trials=5,
+                trials=trial_count,
             )
             return common.generate_routing_passmanager(
                 routing_pass,
@@ -414,11 +483,12 @@ class SabreSwapPassManager(PassManagerStagePlugin):
                 use_barrier_before_measurement=True,
             )
         if optimization_level == 1:
+            trial_count = _get_trial_count(5)
             routing_pass = SabreSwap(
                 coupling_map_routing,
                 heuristic="decay",
                 seed=seed_transpiler,
-                trials=5,
+                trials=trial_count,
             )
             return common.generate_routing_passmanager(
                 routing_pass,
@@ -432,11 +502,13 @@ class SabreSwapPassManager(PassManagerStagePlugin):
                 use_barrier_before_measurement=True,
             )
         if optimization_level == 2:
+            trial_count = _get_trial_count(20)
+
             routing_pass = SabreSwap(
                 coupling_map_routing,
                 heuristic="decay",
                 seed=seed_transpiler,
-                trials=10,
+                trials=trial_count,
             )
             return common.generate_routing_passmanager(
                 routing_pass,
@@ -449,11 +521,12 @@ class SabreSwapPassManager(PassManagerStagePlugin):
                 use_barrier_before_measurement=True,
             )
         if optimization_level == 3:
+            trial_count = _get_trial_count(20)
             routing_pass = SabreSwap(
                 coupling_map_routing,
                 heuristic="decay",
                 seed=seed_transpiler,
-                trials=20,
+                trials=trial_count,
             )
             return common.generate_routing_passmanager(
                 routing_pass,
@@ -543,16 +616,13 @@ class OptimizationPassManager(PassManagerStagePlugin):
                         ]
                     ),
                 ]
+
             elif optimization_level == 2:
-                # Steps for optimization level 2
                 _opt = [
                     Optimize1qGatesDecomposition(
                         basis=pass_manager_config.basis_gates, target=pass_manager_config.target
                     ),
-                    CommutativeCancellation(
-                        basis_gates=pass_manager_config.basis_gates,
-                        target=pass_manager_config.target,
-                    ),
+                    CommutativeCancellation(target=pass_manager_config.target),
                 ]
             elif optimization_level == 3:
                 # Steps for optimization level 3
@@ -598,6 +668,27 @@ class OptimizationPassManager(PassManagerStagePlugin):
 
             if optimization_level == 3:
                 optimization.append(_minimum_point_check)
+            elif optimization_level == 2:
+                optimization.append(
+                    [
+                        Collect2qBlocks(),
+                        ConsolidateBlocks(
+                            basis_gates=pass_manager_config.basis_gates,
+                            target=pass_manager_config.target,
+                            approximation_degree=pass_manager_config.approximation_degree,
+                        ),
+                        UnitarySynthesis(
+                            pass_manager_config.basis_gates,
+                            approximation_degree=pass_manager_config.approximation_degree,
+                            coupling_map=pass_manager_config.coupling_map,
+                            backend_props=pass_manager_config.backend_properties,
+                            method=pass_manager_config.unitary_synthesis_method,
+                            plugin_config=pass_manager_config.unitary_synthesis_plugin_config,
+                            target=pass_manager_config.target,
+                        ),
+                    ]
+                )
+                optimization.append(_depth_check + _size_check)
             else:
                 optimization.append(_depth_check + _size_check)
             opt_loop = (
@@ -722,12 +813,15 @@ class DefaultLayoutPassManager(PassManagerStagePlugin):
                 max_trials=2500,  # Limits layout scoring to < 600ms on ~400 qubit devices
             )
             layout.append(ConditionalController(choose_layout_1, condition=_layout_not_perfect))
+
+            trial_count = _get_trial_count(5)
+
             choose_layout_2 = SabreLayout(
                 coupling_map,
                 max_iterations=2,
                 seed=pass_manager_config.seed_transpiler,
-                swap_trials=5,
-                layout_trials=5,
+                swap_trials=trial_count,
+                layout_trials=trial_count,
                 skip_routing=pass_manager_config.routing_method is not None
                 and pass_manager_config.routing_method != "sabre",
             )
@@ -749,17 +843,20 @@ class DefaultLayoutPassManager(PassManagerStagePlugin):
                 call_limit=int(5e6),  # Set call limit to ~10s with rustworkx 0.10.2
                 properties=pass_manager_config.backend_properties,
                 target=pass_manager_config.target,
-                max_trials=25000,  # Limits layout scoring to < 10s on ~400 qubit devices
+                max_trials=2500,  # Limits layout scoring to < 600ms on ~400 qubit devices
             )
             layout.append(
                 ConditionalController(choose_layout_0, condition=_choose_layout_condition)
             )
+
+            trial_count = _get_trial_count(20)
+
             choose_layout_1 = SabreLayout(
                 coupling_map,
                 max_iterations=2,
                 seed=pass_manager_config.seed_transpiler,
-                swap_trials=10,
-                layout_trials=10,
+                swap_trials=trial_count,
+                layout_trials=trial_count,
                 skip_routing=pass_manager_config.routing_method is not None
                 and pass_manager_config.routing_method != "sabre",
             )
@@ -786,12 +883,15 @@ class DefaultLayoutPassManager(PassManagerStagePlugin):
             layout.append(
                 ConditionalController(choose_layout_0, condition=_choose_layout_condition)
             )
+
+            trial_count = _get_trial_count(20)
+
             choose_layout_1 = SabreLayout(
                 coupling_map,
                 max_iterations=4,
                 seed=pass_manager_config.seed_transpiler,
-                swap_trials=20,
-                layout_trials=20,
+                swap_trials=trial_count,
+                layout_trials=trial_count,
                 skip_routing=pass_manager_config.routing_method is not None
                 and pass_manager_config.routing_method != "sabre",
             )
@@ -887,42 +987,50 @@ class SabreLayoutPassManager(PassManagerStagePlugin):
         layout = PassManager()
         layout.append(_given_layout)
         if optimization_level == 0:
+            trial_count = _get_trial_count(5)
+
             layout_pass = SabreLayout(
                 coupling_map,
                 max_iterations=1,
                 seed=pass_manager_config.seed_transpiler,
-                swap_trials=5,
-                layout_trials=5,
+                swap_trials=trial_count,
+                layout_trials=trial_count,
                 skip_routing=pass_manager_config.routing_method is not None
                 and pass_manager_config.routing_method != "sabre",
             )
         elif optimization_level == 1:
+            trial_count = _get_trial_count(5)
+
             layout_pass = SabreLayout(
                 coupling_map,
                 max_iterations=2,
                 seed=pass_manager_config.seed_transpiler,
-                swap_trials=5,
-                layout_trials=5,
+                swap_trials=trial_count,
+                layout_trials=trial_count,
                 skip_routing=pass_manager_config.routing_method is not None
                 and pass_manager_config.routing_method != "sabre",
             )
         elif optimization_level == 2:
+            trial_count = _get_trial_count(20)
+
             layout_pass = SabreLayout(
                 coupling_map,
                 max_iterations=2,
                 seed=pass_manager_config.seed_transpiler,
-                swap_trials=10,
-                layout_trials=10,
+                swap_trials=trial_count,
+                layout_trials=trial_count,
                 skip_routing=pass_manager_config.routing_method is not None
                 and pass_manager_config.routing_method != "sabre",
             )
         elif optimization_level == 3:
+            trial_count = _get_trial_count(20)
+
             layout_pass = SabreLayout(
                 coupling_map,
                 max_iterations=4,
                 seed=pass_manager_config.seed_transpiler,
-                swap_trials=20,
-                layout_trials=20,
+                swap_trials=trial_count,
+                layout_trials=trial_count,
                 skip_routing=pass_manager_config.routing_method is not None
                 and pass_manager_config.routing_method != "sabre",
             )
@@ -942,3 +1050,9 @@ class SabreLayoutPassManager(PassManagerStagePlugin):
         embed = common.generate_embed_passmanager(coupling_map)
         layout.append(ConditionalController(embed.to_flow_controller(), condition=_swap_mapped))
         return layout
+
+
+def _get_trial_count(default_trials=5):
+    if CONFIG.get("sabre_all_threads", None) or os.getenv("QISKIT_SABRE_ALL_THREADS"):
+        return max(CPU_COUNT, default_trials)
+    return default_trials
