@@ -316,15 +316,15 @@ class BasePauli(BaseOperator, AdjointMixin, MultiplyMixin):
         ret._x[:, qargs_] = False
         ret._z[:, qargs_] = False
 
-        self_xz = np.concatenate((self._x[:,qargs_], self._z[:,qargs_]),axis=1).astype('uint8')
+        self_xz = np.concatenate((self._x[:, qargs_], self._z[:, qargs_]), axis=1).astype("uint8")
         other_plist = PauliList.from_symplectic(z=other.z, x=other.x, phase=2 * other.phase)
-        ret._x[:, qargs_] = (self_xz @ other_plist._x)%2
-        ret._z[:, qargs_] = (self_xz @ other_plist._z)%2
-        up_tri_mask = np.tri(self_xz.shape[1],k=-1,dtype='uint8').T
-        temp = other_plist._z.astype('uint8') @ other_plist._x.T.astype('uint8')
+        ret._x[:, qargs_] = (self_xz @ other_plist._x) % 2
+        ret._z[:, qargs_] = (self_xz @ other_plist._z) % 2
+        up_tri_mask = np.tri(self_xz.shape[1], k=-1, dtype="uint8").T
+        temp = other_plist._z.astype("uint8") @ other_plist._x.T.astype("uint8")
         temp = up_tri_mask * temp
         ret._phase += self_xz @ other_plist._phase
-        ret._phase += 2 * np.einsum('ij,jk,ik->i', self_xz, temp, self_xz)
+        ret._phase += 2 * np.einsum("ij,jk,ik->i", self_xz, temp, self_xz)
         return ret
 
     def _eq(self, other):
