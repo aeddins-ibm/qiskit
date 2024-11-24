@@ -312,25 +312,19 @@ class BasePauli(BaseOperator, AdjointMixin, MultiplyMixin):
         # pylint: disable=cyclic-import
         from qiskit.quantum_info.operators.symplectic.pauli_list import PauliList
 
-        num_paulis = self._x.shape[0]
-
         ret = self.copy()
         ret._x[:, qargs_] = False
         ret._z[:, qargs_] = False
 
-        idx = np.concatenate((self._x[:, qargs_], self._z[:, qargs_]), axis=1)
-        for idx_, row in zip(
-            idx.T,
-            PauliList.from_symplectic(z=adj.z, x=adj.x, phase=2 * adj.phase),
-        ):
-            # most of the logic below is to properly index if self is a PauliList (2D),
-            # while not trying to index if the object is just a Pauli (1D).
-            if idx_.any():
-                if np.sum(idx_) == num_paulis:
-                    ret.compose(row, qargs=qargs, inplace=True)
-                else:
-                    ret[idx_] = ret[idx_].compose(row, qargs=qargs)
-
+        self_xz = np.concatenate((self._x[:,qargs_], self._z[:,qargs_]),axis=1).astype('uint8')
+        other_plist = PauliList.from_symplectic(z=other.z, x=other.x, phase=2 * other.phase)
+        ret._x[:, qargs_] = (self_xz @ other_plist._x)%2
+        ret._z[:, qargs_] = (self_xz @ other_plist._z)%2
+        up_tri_mask = np.tri(self_xz.shape[1],k=-1,dtype='uint8').T
+        temp = other_plist._z.astype('uint8') @ other_plist._x.T.astype('uint8')
+        temp = up_tri_mask * temp
+        ret._phase += self_xz @ other_plist._phase
+        ret._phase += 2 * np.einsum('ij,jk,ik->i', self_xz, temp, self_xz)
         return ret
 
     def _eq(self, other):
