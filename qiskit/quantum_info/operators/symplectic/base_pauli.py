@@ -298,9 +298,11 @@ class BasePauli(BaseOperator, AdjointMixin, MultiplyMixin):
         """Evolution of a Pauli by a Clifford."""
 
         if frame == "s":
-            adj = other
+            pass
+        elif frame == "h":
+            other = other.adjoint()
         else:
-            adj = other.adjoint()
+            raise ValueError(f"Expected frame 's' or 'h' but found {frame}")
 
         if qargs is None:
             qargs_ = slice(None)
